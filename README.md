@@ -2,6 +2,30 @@
 
 > Este repositorio está basado en la plantilla oficial de [Astronomer](https://github.com/astronomer/astro-cli), generada con `astro dev init`. Se ha ampliado con DAGs educativos para un curso universitario de introducción a Airflow.
 
+## Spotify Wrapped: captura y dashboard
+
+El DAG [`spotify_wrapped`](dags/spotify_wrapped.py) consulta cada 30 minutos las reproducciones recientes de la cuenta autorizada. La tarea de extracción entrega los eventos a través de **XCom** y dos tareas `SQLExecuteQueryOperator` crean la tabla y guardan las filas en PostgreSQL sin duplicarlas. El [dashboard](dashboard/app.py) muestra reproducciones, canciones, artistas, días activos, rankings y actividad por día y hora.
+
+### Antes del primer arranque
+
+1. Ten Docker y Astro CLI instalados. En Ubuntu también se necesita Python 3; en macOS, Homebrew. El script de macOS puede instalar Astro CLI, Python y Docker Desktop con Brew si faltan. En Windows comprueba `astro version` y `docker info`.
+2. Copia `.env.example` a `.env` y rellena `SPOTIFY_CLIENT_ID` y `SPOTIFY_CLIENT_SECRET` desde tu app de Spotify Developer. No subas `.env` al repositorio.
+3. Registra **exactamente** `http://127.0.0.1:8888/callback` como Redirect URI en la app y añade la cuenta de Spotify en **User Management** mientras la app esté en modo desarrollo. La primera ejecución abre el navegador para conceder `user-read-recently-played`; el token se guarda en `.env`.
+
+### Una sola orden desde la raíz del proyecto
+
+| Sistema | Orden |
+|---|---|
+| Windows PowerShell | `powershell -ExecutionPolicy Bypass -File .\scripts\setup_spotify_windows.ps1` |
+| Ubuntu | `bash scripts/setup_spotify_ubuntu.sh` |
+| macOS | `bash scripts/setup_spotify_macos.sh` |
+
+El script crea el contenedor `spotify-history-postgres` y el dashboard, configura la conexión **`spotify_postgres`** en Airflow, ejecuta una carga inicial y abre [Spotify Wrapped](http://127.0.0.1:8501). Airflow queda en [localhost:8080](http://localhost:8080). PostgreSQL escucha solo en `127.0.0.1:5433`; el usuario es `spotify`, la base `spotify_history` y la contraseña generada queda en `.env`. El archivo `docker-compose.override.yml` conecta Astro a la misma red de PostgreSQL incluso después de `astro dev restart`.
+
+La API **Recently Played** entrega hasta 50 eventos por petición y no reconstruye un año completo de escucha anterior al inicio de la captura. El dashboard indica las fechas realmente registradas; los recuentos corresponden a eventos capturados, no a minutos reales escuchados. Para un Wrapped retrospectivo haría falta el archivo **Streaming History** exportado por Spotify. La captura futura continúa cada 30 minutos mientras Airflow esté ejecutándose; si se detiene más tiempo del que cubren los eventos recientes, puede haber huecos.
+
+Para abrir el dashboard de nuevo: `http://127.0.0.1:8501`. Para parar los contenedores del dashboard y la base sin borrar los datos: `docker compose -f compose.spotify.yml down`. El volumen `spotify_history_data` conserva el historial.
+
 ## DAGs de ejemplo incluidos
 
 | DAG | Archivo | Qué enseña |
@@ -9,10 +33,25 @@
 | **Astronauts ETL** | [`example_astronauts.py`](dags/example_astronauts.py) | DAG original de Astronomer. TaskFlow API, dynamic task mapping y llamadas a APIs. |
 | **Weather ETL** | [`example_weather_etl.py`](dags/example_weather_etl.py) | Pipeline ETL completo (extract → transform → chart → load). Genera un gráfico de temperatura con matplotlib y lo muestra en la UI de Airflow. API gratuita Open-Meteo, sin credenciales. |
 | **Spotify XCom** | [`example_spotify_xcom.py`](dags/example_spotify_xcom.py) | Concepto de XCom explicado paso a paso. Pipeline lineal: obtener canciones → rankear top 5 → mostrar resumen. |
+| **Spotify Wrapped** | [`spotify_wrapped.py`](dags/spotify_wrapped.py) | Reproducciones recientes → XCom → PostgreSQL con `SQLExecuteQueryOperator` → dashboard visual. |
 | **Spotify Trends** | [`example_spotify_trends.py`](dags/example_spotify_trends.py) | Branching, tareas en paralelo y trigger rules. Simula un análisis de tendencias musicales con caminos condicionales (pop vs rock). |
 | **S3 Pipeline** | [`example_s3_pipeline.py`](dags/example_s3_pipeline.py) | Integración con Amazon S3 (free tier). Genera un CSV de ventas, lo sube a S3 y lo lee de vuelta. Requiere configurar conexión AWS. |
 | **Task States** | [`example_task_states.py`](dags/example_task_states.py) | Muestra los estados más comunes de las tareas: success, failed, up_for_retry, upstream_failed y skipped. Ideal para entender los colores de la UI. |
 | **Ejercicio: Movie Pipeline** | [`exercise_movie_pipeline.py`](dags/exercise_movie_pipeline.py) | Esqueleto incompleto con TODOs para que los alumnos practiquen. Usa la API de OMDb (películas). |
+
+---
+
+## Autorizar Spotify para el DAG de XCom
+
+La app de Spotify debe tener registrada la Redirect URI `http://127.0.0.1:8888/callback`. Para el DAG de XCom, escribe `SPOTIFY_CLIENT_ID` y `SPOTIFY_CLIENT_SECRET` directamente en [`example_spotify_xcom.py`](dags/example_spotify_xcom.py) y ejecuta desde la raíz del proyecto:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\spotify_authorize.ps1
+```
+
+En macOS o Linux ejecuta `python3 scripts/spotify_authorize.py`.
+
+El asistente abre Spotify en el navegador, recibe los permisos `playlist-read-private` y `user-read-recently-played`, comprueba que la cuenta puede leer la playlist y guarda `SPOTIFY_REFRESH_TOKEN` en `.env` y en el DAG sin mostrarlo. Si el navegador no se abre, copia la URL que imprime el script en la terminal. Después, vuelve a ejecutar el DAG en Airflow. El ranking cuenta cuántas veces aparece cada canción de la lista entre hasta 50 reproducciones recientes de la cuenta; Spotify no ofrece el total histórico por canción en la API. Estas reproducciones cuentan aunque se hayan escuchado fuera de la playlist. Si compartes el código, sustituye las credenciales por los valores `TU_...`.
 
 ---
 
@@ -42,6 +81,8 @@ Your Astro project contains the following files and folders:
 ## Paso 1: Arrancar Airflow
 
 Desde la raíz del proyecto, ejecuta:
+
+Si aún no has ejecutado ninguno de los scripts de Spotify Wrapped, crea primero la red compartida una sola vez con `docker network create spotify_history_net`. Si ya existe, continúa con el arranque.
 
 ```bash
 astro dev start

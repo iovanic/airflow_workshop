@@ -1,0 +1,24 @@
+# Astro CLI aplica este override también después de `astro dev restart`.
+# PostgreSQL se inicia con compose.spotify.yml y comparte esta red externa.
+services:
+  scheduler:
+    networks:
+      - airflow
+      - spotify_history
+  dag-processor:
+    networks:
+      - airflow
+      - spotify_history
+  api-server:
+    networks:
+      - airflow
+      - spotify_history
+  triggerer:
+    networks:
+      - airflow
+      - spotify_history
+
+networks:
+  spotify_history:
+    external: true
+    name: spotify_history_net

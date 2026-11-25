@@ -1,6 +1,7 @@
 # Astro / Airflow
 .astro/
 airflow_settings.yaml
+spotify_airflow_settings.yaml
 __pycache__/
 *.pyc
 *.pyo
@@ -17,3 +18,7 @@ Thumbs.db
 
 # Env
 .env
+
+# Dags
+exercise_movie_pipeline_solution.py
+notebook_solution.ipynb
